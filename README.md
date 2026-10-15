@@ -51,6 +51,10 @@ report."). Without it Mizu hides the "hold to talk" button, because iOS would cr
   || /usr/libexec/PlistBuddy -c "Add :MizuGitSHA string $(git rev-parse --short HEAD)" "$TARGET_BUILD_DIR/$INFOPLIST_PATH"
 ```
 
+Newer Xcode projects sandbox build scripts (`ENABLE_USER_SCRIPT_SANDBOXING = YES`), which can stop `git` from
+reading `.git`; the script then fails quietly and reports just lack a commit. Set it to `NO` for the app target if
+you want the commit (scripts then run unsandboxed), or skip this step.
+
 ## Timeline
 
 Mizu keeps a rolling 10-minute timeline (screens, taps, keyboard, text focus, network requests, app lifecycle)
@@ -76,8 +80,11 @@ call.finish(output: reply, inputTokens: 1200, outputTokens: 300)   // or call.fa
 ```
 
 Or wrap a request: `try await Mizu.traceLLM(model:messages:output:) { try await client.send(...) }`.
-The last 30 calls (about 2M characters) stay on the phone and go with reports. Set
-`Options.recordLLMContent = false` to keep only model, timing and token counts.
+The last 30 calls (about 2M characters) stay on the phone and go with reports.
+
+Full prompts and replies are recorded in debug builds (you testing your own app) and **off in release builds**
+(`enableInRelease`, where they'd be other people's conversations). `Options.recordLLMContent` overrides that:
+`false` keeps only model, timing and token counts everywhere, `true` records text in release builds too.
 
 ## Feature gaps
 
@@ -92,10 +99,29 @@ let result = Mizu.handleFeatureGap(input: toolUse.input, conversation: history) 
 
 Claude sees them with `list_requests` / `get_request`.
 
+`FeatureGap.systemPrompt` adds exactly this to your prompt: *"If the user asks for something you or this app can't
+do yet, don't pretend and don't just say no. If it isn't clear what they want or why, ask one or two short
+questions first. Then call report_unsupported_request and tell them, in a sentence, that you've passed it on to
+the developer."* The last 12 messages of the conversation go with each request.
+
+## Network
+
+Mizu sees URLSession requests by replacing `URLSessionTask.resume` (on Foundation's concrete task classes) with a
+version that notes the request and then calls the original, and by observing each task's `state`. It only
+watches: it's never in the data path, so it can't change or break responses, streaming included. It records method,
+host, path, status, size and duration. Path segments that look like emails, UUIDs or long ids are replaced
+(`/users/jane@x.com/orders/48213` → `/users/:email/orders/:id`). To leave hosts out entirely:
+
+```swift
+var options = Mizu.Options()
+options.ignoredHosts = ["auth.example.com"]   // subdomains included
+```
+
 ## Never recorded
 
-Anything typed (secure fields included), keyboard key taps, URL query strings, and request/response bodies. Reports
-only go to the Mizu app you started with that ingest key.
+Anything typed (secure fields included), keyboard key taps, URL query strings, request headers and bodies. Reports
+only go to the Mizu app you started with that ingest key. What's stored and how to delete it:
+[mizu.dance/privacy](https://mizu.dance/privacy).
 
 ## Tests
 

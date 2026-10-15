@@ -70,7 +70,7 @@ final class TimelineTests: XCTestCase {
 final class NetworkObserverTests: XCTestCase {
     func testRecordsRequestsWithoutQueryStrings() async throws {
         let timeline = Timeline()
-        NetworkObserver(timeline: timeline, ignoredHost: "mizu.test").install()
+        NetworkObserver(timeline: timeline, ignoredHosts: ["mizu.test"]).install()
         StubProtocol.reset()
         StubProtocol.mode = .status(201)
 

@@ -20,8 +20,22 @@ public enum Mizu {
         public var enableInRelease = false
         /// Keep a rolling timeline (screens, taps, keyboard, network, logs) and attach it to reports.
         public var recordTimeline = true
-        /// Keep full prompts and responses of `Mizu.llm` calls. Off records only model, timing and token counts.
-        public var recordLLMContent = true
+        /// Keep full prompts and responses of `Mizu.llm` calls; off keeps only model, timing and token counts.
+        /// `nil` (the default) means: on in debug builds, which are you testing your own app, and off in release
+        /// builds (`enableInRelease`), where it would be other people's conversations. Set it to decide yourself.
+        public var recordLLMContent: Bool? = nil
+        /// Hosts whose requests are left out of the timeline, e.g. `["auth.example.com"]`. Subdomains are included.
+        public var ignoredHosts: [String] = []
+
+        /// What `recordLLMContent` comes to for this build.
+        var llmContentEnabled: Bool {
+            if let recordLLMContent { return recordLLMContent }
+            #if DEBUG
+            return true
+            #else
+            return false
+            #endif
+        }
 
         public init() {}
     }
@@ -64,11 +78,15 @@ public enum Mizu {
             timeline.record("app.launch", launch)
             self.timeline = timeline
 
-            let network = NetworkObserver(timeline: timeline, ignoredHost: options.endpoint.host)
+            let ignored = Set(([options.endpoint.host].compactMap { $0 } + options.ignoredHosts).map { $0.lowercased() })
+            let network = NetworkObserver(timeline: timeline, ignoredHosts: ignored)
             network.install()
             networkObserver = network
 
-            let llm = LLMStore(timeline: timeline, recordContent: options.recordLLMContent, storeURL: LLMStore.defaultStoreURL())
+            let llm = LLMStore(timeline: timeline, recordContent: options.llmContentEnabled, storeURL: LLMStore.defaultStoreURL())
+            MizuLog.warn(options.llmContentEnabled
+                ? "Recording full LLM prompts and replies from Mizu.llm (debug build). Set Options.recordLLMContent = false to keep only timing and token counts."
+                : "Recording LLM timing and token counts only (no prompt or reply text).")
             llm.restore()
             llmStore = llm
 
@@ -83,7 +101,7 @@ public enum Mizu {
         let config = ConfigClient(endpoint: options.endpoint, ingestKey: key)
         config.timeline = timeline
         config.llmStore = llmStore
-        config.defaultLLMContent = options.recordLLMContent
+        config.defaultLLMContent = options.llmContentEnabled
         #if canImport(UIKit)
         config.onNewRepro = { repro in
             MainActor.assumeIsolated { ReproBanner.show(repro) }
