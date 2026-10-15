@@ -101,6 +101,18 @@ final class UploaderTests: XCTestCase {
         XCTAssertNotNil(json["client_id"], "retries stay idempotent")
     }
 
+    func testAttachmentsShareOneFieldWithTheirOwnFilenames() async throws {
+        try outbox.enqueue(meta: ["note": "x"], parts: [
+            MizuAttachment(name: "pipeline.log", text: "step 1").outboxPart,
+            MizuAttachment(name: "turn.json", text: "{}").outboxPart,
+        ])
+        StubProtocol.mode = .status(201)
+        _ = await uploader.flush()
+        let body = String(decoding: try XCTUnwrap(StubProtocol.successfulRequests.first).body, as: UTF8.self)
+        XCTAssertTrue(body.contains("name=\"attachment\"; filename=\"pipeline.log\""))
+        XCTAssertTrue(body.contains("name=\"attachment\"; filename=\"turn.json\""))
+    }
+
     func testServerErrorsKeepReportsAndAuthErrorsToo() async throws {
         try outbox.enqueue(meta: [:])
         for status in [500, 503, 429, 401] {

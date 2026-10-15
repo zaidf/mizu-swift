@@ -6,7 +6,11 @@ struct OutboxPart: Equatable {
     let contentType: String
     let data: Data
 
+    /// Multipart field: attachments share one field, "attachment", each with its own file name.
+    var fieldName: String { name.hasPrefix("attachment:") ? "attachment" : name }
+
     var filename: String {
+        if name.hasPrefix("attachment:") { return String(name.dropFirst("attachment:".count)) }
         switch contentType {
         case "image/jpeg": return "\(name).jpg"
         case "image/png": return "\(name).png"

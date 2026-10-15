@@ -69,6 +69,32 @@ Mizu.debug("history before send", tag: "context", data: ["count": history.count]
 `Mizu.debug` lines cost nothing until Claude turns their tag on with the `set_capture` MCP tool. The app picks
 that up on next launch or return to the foreground, no rebuild, and it expires after 24h.
 
+## Your own steps, files, and "Share debug"
+
+Record the app's own pipeline steps under their own kinds, so Claude can filter to them:
+
+```swift
+Mizu.event("pipeline.retrieve", data: ["query": q, "chunks": 8, "ms": 412])
+```
+
+Send files with every report, the shake included, instead of building a debug zip:
+
+```swift
+Mizu.attachments = { [MizuAttachment(name: "pipeline.log", text: Pipeline.shared.log)] }
+```
+
+And make a "Share debug" button one call. It sends the screenshot, timeline, LLM calls, `Mizu.attachments`, and
+any files you pass. Pass the LLM call it's about, and Claude opens that turn first:
+
+```swift
+Mizu.shareDebug(note: "turn \(turn.id)",
+                attachments: [MizuAttachment(name: "turn.json", text: dump)],   // or MizuAttachment(name:json:) / (fileURL:)
+                llmCall: turn.call)
+```
+
+Limits: 20 files, 10 MB each, 25 MB per report (extras are left out and noted in the timeline). Claude reads text
+attachments a page or a search at a time with `get_attachment`, so long logs don't get cut off.
+
 ## LLM calls
 
 Record what your app actually sends, so Claude can check the context and timing:

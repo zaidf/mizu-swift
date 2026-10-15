@@ -30,6 +30,7 @@ enum ReporterPresenter {
             var parts = context
             if attach, let jpeg = shot?.jpeg { parts.append(OutboxPart(name: "screenshot", contentType: "image/jpeg", data: jpeg)) }
             if let audio { parts.append(OutboxPart(name: "audio", contentType: VoiceRecorder.audioType, data: audio)) }
+            parts += Mizu.attachmentParts()
             Mizu.report(note: note, screen: screen, parts: parts)
         }
         if let sheet = controller.sheetPresentationController {
@@ -72,6 +73,14 @@ final class ReportSheetController: UIHostingController<ReportSheet> {
 }
 
 enum Screenshot {
+    /// JPEG of whatever is on screen in the active scene, for `Mizu.shareDebug`.
+    @MainActor
+    static func captureActiveScene() -> Data? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        guard let scene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first else { return nil }
+        return capture(scene)?.jpeg
+    }
+
     @MainActor
     static func capture(_ scene: UIWindowScene) -> (image: UIImage, jpeg: Data)? {
         let bounds = scene.screen.bounds

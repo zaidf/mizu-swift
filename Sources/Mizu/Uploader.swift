@@ -52,7 +52,7 @@ actor Uploader {
                 var form = Multipart()
                 form.addField("meta", value: item.meta)
                 for part in item.parts {
-                    form.addFile(part.name, filename: part.filename, contentType: part.contentType, data: part.data)
+                    form.addFile(part.fieldName, filename: part.filename, contentType: part.contentType, data: part.data)
                 }
                 request.setValue(form.contentType, forHTTPHeaderField: "Content-Type")
                 body = form.finish()

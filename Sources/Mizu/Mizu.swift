@@ -43,6 +43,12 @@ public enum Mizu {
     /// Overrides the auto-detected screen name sent with reports, e.g. `Mizu.screenName = "ChatView"`.
     public static var screenName: String?
 
+    /// Files to send with every report, shake included: logs, pipeline state, whatever you'd have zipped.
+    /// Called when a report is made, so it can return what's current.
+    ///
+    ///     Mizu.attachments = { [MizuAttachment(name: "pipeline.log", text: Pipeline.shared.log)] }
+    public static var attachments: (() -> [MizuAttachment])?
+
     public static var isRunning: Bool { client != nil }
 
     static var client: MizuClient?
@@ -130,7 +136,7 @@ public enum Mizu {
     public static func debug(_ message: @autoclosure () -> String, tag: String, data: @autoclosure () -> [String: Any] = [:]) {
         guard let timeline, configClient?.debugGate.isOn(tag) == true else { return }
         var fields = data().mapValues(TimelineValue.init)
-        fields["message"] = .string(String(message().prefix(4000)))
+        fields["message"] = .string(String(message().prefix(8000)))
         fields["tag"] = .string(tag)
         timeline.record("debug", fields)
     }
@@ -141,9 +147,23 @@ public enum Mizu {
     public static func log(_ message: String, tag: String? = nil, data: [String: Any] = [:]) {
         guard let timeline else { return }
         var fields = data.mapValues(TimelineValue.init)
-        fields["message"] = .string(String(message.prefix(2000)))
+        fields["message"] = .string(String(message.prefix(8000)))
         if let tag { fields["tag"] = .string(tag) }
         timeline.record("log", fields)
+    }
+
+    /// A structured step in the timeline under your own event kind, so Claude can filter to it
+    /// (`get_timeline kinds:["pipeline"]`). Use dotted names: "pipeline.retrieve", "pipeline.rerank".
+    ///
+    ///     Mizu.event("pipeline.retrieve", data: ["query": q, "chunks": 8, "ms": 412])
+    public static func event(_ kind: String, data: [String: Any] = [:]) {
+        guard let timeline else { return }
+        let name = kind.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        timeline.record(String(name.prefix(100)), data.mapValues { value in
+            if case .string(let s) = TimelineValue(value) { return .string(String(s.prefix(8000))) }
+            return TimelineValue(value)
+        })
     }
 
     /// Starts recording one LLM call: exactly what your app is sending. Finish it with `call.finish(output:)`.
@@ -198,6 +218,7 @@ public enum Mizu {
     public static func report(note: String? = nil, screenshot: Data? = nil, screenshotType: String = "image/jpeg") {
         var parts = contextParts(trigger: "api")
         if let screenshot { parts.append(OutboxPart(name: "screenshot", contentType: screenshotType, data: screenshot)) }
+        parts += attachmentParts()
         report(note: note, screen: currentScreen(), parts: parts)
     }
 
@@ -227,7 +248,41 @@ public enum Mizu {
         return parts
     }
 
-    static func report(note: String?, screen: String?, parts: [OutboxPart]) {
+    /// The app's own files for a report: `Mizu.attachments` plus any passed in, within the server's limits.
+    static func attachmentParts(_ extra: [MizuAttachment] = []) -> [OutboxPart] {
+        let all = (attachments?() ?? []) + extra
+        guard !all.isEmpty else { return [] }
+        let (kept, dropped) = MizuAttachment.fitting(all)
+        if !dropped.isEmpty {
+            timeline?.record("mizu.attachments_dropped", ["names": .string(dropped.joined(separator: ", ")),
+                                                          "why": "over 20 files, 10 MB each or 25 MB total"])
+            MizuLog.warn("Attachments over the limits were left out: \(dropped.joined(separator: ", "))")
+        }
+        return kept.map(\.outboxPart)
+    }
+
+    /// One call for a "Share debug" button: screenshot, timeline, LLM calls, `Mizu.attachments` and these files,
+    /// sent as a report. Pass the LLM call the user is asking about so Claude looks at that turn first.
+    ///
+    ///     Button("Share debug") {
+    ///         Mizu.shareDebug(note: "turn \(turn.id)", attachments: [MizuAttachment(name: "turn.json", text: dump)], llmCall: turn.call)
+    ///     }
+    public static func shareDebug(note: String? = nil, attachments extra: [MizuAttachment] = [], llmCall: LLMCall? = nil,
+                                  captureScreenshot: Bool = true) {
+        var parts = contextParts(trigger: "share_debug")
+        #if canImport(UIKit)
+        if captureScreenshot {
+            let shot: Data? = Thread.isMainThread
+                ? MainActor.assumeIsolated { Screenshot.captureActiveScene() }
+                : DispatchQueue.main.sync { MainActor.assumeIsolated { Screenshot.captureActiveScene() } }
+            if let shot { parts.append(OutboxPart(name: "screenshot", contentType: "image/jpeg", data: shot)) }
+        }
+        #endif
+        parts += attachmentParts(extra)
+        report(note: note, screen: currentScreen(), parts: parts, extraMeta: llmCall.map { ["llm_call": $0.id] } ?? [:])
+    }
+
+    static func report(note: String?, screen: String?, parts: [OutboxPart], extraMeta: [String: Any] = [:]) {
         guard let client else {
             MizuLog.warn("Mizu.report called before Mizu.start; ignoring.")
             return
@@ -235,6 +290,7 @@ public enum Mizu {
         var meta = DeviceInfo.appMeta()
         if let note, !note.isEmpty { meta["note"] = note }
         if let screen { meta["screen"] = screen }
+        meta.merge(extraMeta) { _, new in new }
         if let repro = configClient?.activeRepro {
             meta["repro_id"] = repro.id
             configClient?.answered(repro)
