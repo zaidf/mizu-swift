@@ -7,12 +7,14 @@ struct ReportSheet: View {
     let screen: String
     /// Set when this report answers Claude's repro request.
     let reproNote: String?
-    let send: (_ note: String, _ attachScreenshot: Bool, _ audio: Data?) -> Void
+    let send: (_ note: String, _ attachScreenshot: Bool, _ audio: Data?, _ photos: [Data]) -> Void
     let dismiss: () -> Void
 
     @State private var note = ""
     @State private var attachScreenshot = true
     @State private var sent = false
+    @State private var photos: [PickedPhoto] = []
+    @State private var loadingPhotos = 0
     @StateObject private var recorder = VoiceRecorder()
     @FocusState private var noteFocused: Bool
 
@@ -72,20 +74,23 @@ struct ReportSheet: View {
                     }
                 }
 
+                PhotoAttachments(photos: $photos, loading: $loadingPhotos)
+
                 Spacer(minLength: 0)
 
                 Button {
                     recorder.stop()
-                    send(note.trimmingCharacters(in: .whitespacesAndNewlines), attachScreenshot, recorder.audio)
+                    send(note.trimmingCharacters(in: .whitespacesAndNewlines), attachScreenshot, recorder.audio, photos.map(\.jpeg))
                     withAnimation { sent = true }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.8, execute: dismiss)
                 } label: {
-                    Text("send to claude →")
+                    Text(loadingPhotos > 0 ? "adding photos…" : "send to claude →")
                         .font(.system(.body, design: .monospaced).bold())
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(loadingPhotos > 0)
                 .tint(.primary)
                 .foregroundStyle(Color(uiColor: .systemBackground))
             }

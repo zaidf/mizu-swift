@@ -310,11 +310,15 @@ public enum Mizu {
     }
 
     #if canImport(UIKit)
-    /// Opens the report sheet, same as shaking.
+    /// Opens the report sheet, same as shaking. Wire it to your own bug button:
+    ///
+    ///     if Mizu.isRunning { Button { Mizu.showReporter() } label: { Image(systemName: "ladybug") } }
+    ///
+    /// - Parameter trigger: what opened it, recorded in the timeline so Claude knows ("button" by default).
     @MainActor
-    public static func showReporter() {
+    public static func showReporter(trigger: String = "button") {
         guard isRunning else { return }
-        ReporterPresenter.present()
+        ReporterPresenter.present(trigger: trigger)
     }
     #endif
 }

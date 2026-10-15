@@ -37,8 +37,16 @@ struct MyApp: App {
 }
 ```
 
-Shake to report, or call `Mizu.showReporter()` / `Mizu.report(note:)` yourself. Reports wait in an on-disk outbox
-and upload when the network is back. Mizu does nothing in Release builds unless you set
+Shake to report, or call `Mizu.showReporter()` / `Mizu.report(note:)` yourself. For a bug button of your own:
+
+```swift
+if Mizu.isRunning { Button { Mizu.showReporter() } label: { Image(systemName: "ladybug") } }
+```
+
+The timeline records what opened the sheet (`shake`, `button`, or your own `trigger:`). The sheet's **+ photos**
+attaches up to 5 pictures from the camera roll, e.g. a mockup or a screenshot from another app; there's no
+photo-library permission prompt, since the app only gets the photos you pick, and location and other metadata
+are stripped. Reports wait in an on-disk outbox and upload when the network is back. Mizu does nothing in Release builds unless you set
 `Options.enableInRelease`.
 
 **Voice notes:** add `NSMicrophoneUsageDescription` to your Info.plist (e.g. "Record a voice note for a bug

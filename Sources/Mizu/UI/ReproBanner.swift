@@ -51,7 +51,7 @@ enum ReproBanner {
     static func show(_ repro: RemoteConfig.Repro) -> Bool {
         let shown = MizuBanner.show(
             title: "CLAUDE ASKS", message: repro.note,
-            action: (title: "report now →", run: { Mizu.showReporter() }),
+            action: (title: "report now →", run: { Mizu.showReporter(trigger: "repro_request") }),
             onClose: { Mizu.configClient?.markSeen(repro) }
         )
         if shown { Mizu.timeline?.record("mizu.repro_shown", ["id": .string(repro.id)]) }

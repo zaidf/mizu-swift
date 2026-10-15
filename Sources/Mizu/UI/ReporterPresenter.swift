@@ -6,7 +6,7 @@ extension UIWindow {
     // Shake anywhere in the app opens the report sheet.
     open override func motionEnded(_ motion: UIEvent.EventSubtype, with event: UIEvent?) {
         if motion == .motionShake, Mizu.isRunning, Mizu.options.shakeToReport {
-            Mizu.showReporter()
+            Mizu.showReporter(trigger: "shake")
             return
         }
         super.motionEnded(motion, with: event)
@@ -15,21 +15,22 @@ extension UIWindow {
 
 @MainActor
 enum ReporterPresenter {
-    static func present() {
+    static func present(trigger: String) {
         guard let scene = activeScene(), let window = scene.keyWindow ?? scene.windows.first else { return }
         guard let top = topViewController(window.rootViewController) else { return }
         if top is ReportSheetController { return }
 
         // Capture before the sheet covers anything, and before typing the note adds its own taps.
         let shot = Screenshot.capture(scene)
-        let context = Mizu.contextParts(trigger: "shake")
+        let context = Mizu.contextParts(trigger: trigger)
         let screen = Mizu.currentScreen() ?? ScreenName.from(typeName: String(describing: type(of: top)))
 
         let controller = ReportSheetController(screenshot: shot?.image, screen: screen,
-                                               reproNote: Mizu.configClient?.activeRepro?.note) { note, attach, audio in
+                                               reproNote: Mizu.configClient?.activeRepro?.note) { note, attach, audio, photos in
             var parts = context
             if attach, let jpeg = shot?.jpeg { parts.append(OutboxPart(name: "screenshot", contentType: "image/jpeg", data: jpeg)) }
             if let audio { parts.append(OutboxPart(name: "audio", contentType: VoiceRecorder.audioType, data: audio)) }
+            parts += PickedPhoto.parts(photos)
             parts += Mizu.attachmentParts()
             Mizu.report(note: note, screen: screen, parts: parts)
         }
@@ -62,7 +63,7 @@ enum ReporterPresenter {
 }
 
 final class ReportSheetController: UIHostingController<ReportSheet> {
-    init(screenshot: UIImage?, screen: String, reproNote: String?, send: @escaping (String, Bool, Data?) -> Void) {
+    init(screenshot: UIImage?, screen: String, reproNote: String?, send: @escaping (String, Bool, Data?, [Data]) -> Void) {
         var dismiss: () -> Void = {}
         super.init(rootView: ReportSheet(screenshot: screenshot, screen: screen, reproNote: reproNote, send: send, dismiss: { dismiss() }))
         dismiss = { [weak self] in self?.dismiss(animated: true) }
