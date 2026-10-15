@@ -56,6 +56,8 @@ public enum Mizu {
     static var timeline: Timeline?
     static var llmStore: LLMStore?
     static var configClient: ConfigClient?
+    /// Anonymous id for this install; goes with reports and feature requests (see InstallID).
+    static var installID: String?
     private static var networkObserver: NetworkObserver?
     private static var persistTimer: Timer?
 
@@ -104,7 +106,11 @@ public enum Mizu {
         }
 
         // What Claude asked this app to capture: cached copy now, fresh copy as soon as the network allows.
+        let install = InstallID.load()
+        installID = install
         let config = ConfigClient(endpoint: options.endpoint, ingestKey: key)
+        config.installID = install
+        config.build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
         config.timeline = timeline
         config.llmStore = llmStore
         config.defaultLLMContent = options.llmContentEnabled
@@ -112,11 +118,15 @@ public enum Mizu {
         config.onNewRepro = { repro in
             MainActor.assumeIsolated { ReproBanner.show(repro) }
         }
+        config.onFixed = { notice in
+            MainActor.assumeIsolated { FixedBanner.show(notice) }
+        }
         NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: nil) { _ in
             Task { await config.refresh() }
         }
         #else
         config.onNewRepro = { _ in false }
+        config.onFixed = { _ in false }
         #endif
         config.loadCache()
         configClient = config
@@ -291,6 +301,7 @@ public enum Mizu {
         if let note, !note.isEmpty { meta["note"] = note }
         if let screen { meta["screen"] = screen }
         meta.merge(extraMeta) { _, new in new }
+        if let installID { meta["install_id"] = installID }
         if let repro = configClient?.activeRepro {
             meta["repro_id"] = repro.id
             configClient?.answered(repro)

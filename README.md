@@ -130,6 +130,19 @@ do yet, don't pretend and don't just say no. If it isn't clear what they want or
 questions first. Then call report_unsupported_request and tell them, in a sentence, that you've passed it on to
 the developer."* The last 12 messages of the conversation go with each request.
 
+## Closing the loop
+
+When Claude fixes something you reported (`resolve_report`) or builds something users asked for
+(`update_request` → shipped), the install that sent it shows a small card once, the next time it opens:
+
+    FIXED
+    Hotel photos load instantly now.
+    you reported: "hotel photos take seconds to load"
+
+With `fixed_in_build`, it waits until the app's `CFBundleVersion` is that build or later, so nobody is told about a
+fix they don't have yet. Nothing to set up: each install gets a random ID (`Application Support/Mizu/install-id`,
+not tied to the person or device) that goes with its reports and requests, and the card appears on check-in.
+
 ## Network
 
 Mizu sees URLSession requests by replacing `URLSessionTask.resume` (on Foundation's concrete task classes) with a

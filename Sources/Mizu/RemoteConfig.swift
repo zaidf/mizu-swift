@@ -22,6 +22,16 @@ struct RemoteConfig: Codable, Equatable {
     }
 }
 
+/// Something this install reported (or asked for) that's now fixed in a build it's running.
+struct FixedNotice: Codable, Equatable {
+    let id: String
+    let kind: String          // "report" | "request"
+    let what: String          // what they reported or asked for
+    let note: String?         // what was done
+    let fixed_in_build: String?
+    let reported_at: Int64
+}
+
 /// `Mizu.debug` lines are off unless Claude turns their tag on.
 final class DebugGate: @unchecked Sendable {
     private let lock = NSLock()
@@ -65,6 +75,14 @@ final class ConfigClient: @unchecked Sendable {
     weak var llmStore: LLMStore?
     /// What the app chose in `Mizu.Options`, restored when an override is cleared or expires.
     var defaultLLMContent = true
+    /// Sent with each check-in so the server knows which fixes this install should hear about.
+    var installID: String?
+    var build: String?
+    /// Called on the main thread for each fix this install hasn't been told about. Returns whether it was shown.
+    var onFixed: ((FixedNotice) -> Bool)?
+    /// Fixes shown this launch, so a slow acknowledgement never shows one twice.
+    private var shownFixes: Set<String> = []
+
     /// Called on the main thread when a repro request the developer hasn't seen yet arrives.
     /// Returns whether the banner could be shown (not yet, e.g., during launch); if not, the next refresh tries again.
     var onNewRepro: ((RemoteConfig.Repro) -> Bool)?
@@ -116,12 +134,46 @@ final class ConfigClient: @unchecked Sendable {
         var request = URLRequest(url: endpoint.appendingPathComponent("v1/config"))
         request.setValue("Bearer \(ingestKey)", forHTTPHeaderField: "Authorization")
         request.cachePolicy = .reloadIgnoringLocalCacheData
-        struct Response: Decodable { let config: RemoteConfig }
+        if let installID { request.setValue(installID, forHTTPHeaderField: "X-Mizu-Install") }
+        if let build { request.setValue(build, forHTTPHeaderField: "X-Mizu-Build") }
+        struct Response: Decodable { let config: RemoteConfig; let fixed: [FixedNotice]? }
         guard let (data, response) = try? await session.data(for: request),
               (response as? HTTPURLResponse)?.statusCode == 200,
               let decoded = try? JSONDecoder().decode(Response.self, from: data) else { return false }
         update(decoded.config)
+        deliver(decoded.fixed ?? [])
         return true
+    }
+
+    /// Shows the first fix not shown yet; the rest wait for the next check-in, one card at a time.
+    func deliver(_ fixes: [FixedNotice]) {
+        lock.lock()
+        let next = fixes.first { !shownFixes.contains($0.id) }
+        lock.unlock()
+        guard let next else { return }
+        DispatchQueue.main.async {
+            guard self.onFixed?(next) == true else { return }
+            self.lock.lock()
+            self.shownFixes.insert(next.id)
+            self.lock.unlock()
+        }
+    }
+
+    /// The person closed the "Fixed" card: tell the server so it isn't shown again.
+    func acknowledge(_ notice: FixedNotice) {
+        Task { await sendSeen([notice.id]) }
+    }
+
+    @discardableResult
+    func sendSeen(_ ids: [String]) async -> Bool {
+        var request = URLRequest(url: endpoint.appendingPathComponent("v1/notices/seen"))
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(ingestKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let installID { request.setValue(installID, forHTTPHeaderField: "X-Mizu-Install") }
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["ids": ids])
+        guard let (_, response) = try? await session.data(for: request) else { return false }
+        return (response as? HTTPURLResponse)?.statusCode == 200
     }
 
     func update(_ config: RemoteConfig) {

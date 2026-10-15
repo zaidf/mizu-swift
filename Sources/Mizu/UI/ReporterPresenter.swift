@@ -85,7 +85,7 @@ enum Screenshot {
     static func capture(_ scene: UIWindowScene) -> (image: UIImage, jpeg: Data)? {
         let bounds = scene.screen.bounds
         // Mizu's own banner isn't part of the app.
-        let banners = scene.windows.compactMap { $0.viewWithTag(ReproBanner.viewTag) }.filter { !$0.isHidden }
+        let banners = scene.windows.compactMap { $0.viewWithTag(MizuBanner.viewTag) }.filter { !$0.isHidden }
         banners.forEach { $0.isHidden = true }
         defer { banners.forEach { $0.isHidden = false } }
         let format = UIGraphicsImageRendererFormat()

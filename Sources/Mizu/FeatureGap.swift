@@ -85,6 +85,7 @@ extension Mizu {
         body["app_version"] = app["app_version"]
         body["build"] = app["build"]
         body["screen"] = currentScreen()
+        body["install_id"] = installID
         client.send(meta: body, parts: [], path: "v1/requests")
         return FeatureGap.toolResult
     }
