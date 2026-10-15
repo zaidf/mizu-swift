@@ -5,7 +5,7 @@ testing your own app, and your coding agent gets a screenshot, your note or voic
 timeline of the last few minutes, and the app's LLM calls, over MCP.
 
 Setup (account, MCP, app key) is at [mizu.dance](https://mizu.dance). The easiest way is to tell Claude Code
-"set me up with mizu.dance": it follows [mizu.dance/agents.txt](https://mizu.dance/agents.txt).
+"Set me up with Mizu: https://mizu.dance/agents.txt". It follows those instructions.
 
 iOS 16+ (macOS 13+ builds, for tests). Swift 5.10+.
 
