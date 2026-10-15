@@ -39,55 +39,37 @@ struct PickedPhoto: Identifiable, Equatable {
     }
 }
 
-/// "+ photos" and the picked photos as small thumbnails, each with an ✕.
+/// The picked photos as tiles, each with an ✕, then a "+" tile that opens the system photo picker.
+/// Sits in the report sheet's attachment row, after the screenshot and voice note.
 struct PhotoAttachments: View {
     @Binding var photos: [PickedPhoto]
     @Binding var loading: Int
     @State private var selection: [PhotosPickerItem] = []
 
-    private let small = Font.system(.footnote, design: .monospaced)
-
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 10) {
-                PhotosPicker(selection: $selection, maxSelectionCount: PickedPhoto.maxCount, matching: .images) {
-                    Text(photos.isEmpty ? "+ photos" : "+ / edit")
-                        .font(small)
-                        .padding(.horizontal, 10)
-                        .frame(height: 64)
-                        .overlay(Rectangle().stroke(.secondary.opacity(0.5), style: StrokeStyle(lineWidth: 1, dash: [3, 3])))
+        ForEach(photos) { photo in
+            Image(uiImage: photo.thumbnail)
+                .resizable()
+                .scaledToFill()
+                .mizuTile()
+                .overlay(alignment: .topTrailing) {
+                    TileBadge(symbol: "xmark", filled: true) { selection.removeAll { $0 == photo.id } }
+                        .accessibilityLabel("Remove photo")
                 }
-                .foregroundStyle(.primary)
-                .accessibilityLabel("Attach photos")
-
-                ForEach(photos) { photo in
-                    Image(uiImage: photo.thumbnail)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 64, height: 64)
-                        .clipped()
-                        .overlay(Rectangle().stroke(.secondary.opacity(0.4)))
-                        .overlay(alignment: .topTrailing) {
-                            Button {
-                                selection.removeAll { $0 == photo.id }
-                            } label: {
-                                Image(systemName: "xmark")
-                                    .font(.system(size: 9, weight: .bold))
-                                    .foregroundStyle(Color(uiColor: .systemBackground))
-                                    .frame(width: 18, height: 18)
-                                    .background(Color.primary, in: Circle())
-                            }
-                            .offset(x: 6, y: -6)
-                            .accessibilityLabel("Remove photo")
-                        }
-                }
-                if loading > 0 {
-                    ProgressView().frame(width: 64, height: 64)
-                }
-            }
-            .padding(.top, 6)
-            .padding(.trailing, 8)
         }
+        ForEach(0..<loading, id: \.self) { _ in
+            ProgressView().mizuTile()
+        }
+        // Always there (the picker also edits the selection); just faint once there are five.
+        PhotosPicker(selection: $selection, maxSelectionCount: PickedPhoto.maxCount, matching: .images) {
+            Image(systemName: "plus")
+                .font(.system(size: 18, weight: .regular))
+                .foregroundStyle(.secondary)
+                .mizuTile(dashed: true)
+                .opacity(photos.count + loading < PickedPhoto.maxCount ? 1 : 0.4)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(photos.isEmpty ? "Attach photos" : "Change attached photos")
         .onChange(of: selection) { items in
             photos.removeAll { !items.contains($0.id) }
             let new = items.filter { item in !photos.contains { $0.id == item } }
@@ -108,6 +90,43 @@ struct PhotoAttachments: View {
                 photos.sort { a, b in (selection.firstIndex(of: a.id) ?? 0) < (selection.firstIndex(of: b.id) ?? 0) }
             }
         }
+    }
+}
+
+/// The report sheet's attachment tiles: 64pt squares with a hairline edge.
+extension View {
+    func mizuTile(dashed: Bool = false) -> some View {
+        frame(width: 64, height: 64)
+            .contentShape(Rectangle())
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color.primary.opacity(dashed ? 0.3 : 0.15), style: StrokeStyle(lineWidth: 1, dash: dashed ? [3, 3] : []))
+            )
+    }
+}
+
+/// The small round button on a tile's corner: ✕ to remove, ✓ for "included".
+struct TileBadge: View {
+    let symbol: String?
+    let filled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                Circle().fill(filled ? Color.primary : Color(uiColor: .systemBackground))
+                Circle().stroke(Color.primary.opacity(filled ? 0 : 0.4), lineWidth: 1)
+                if let symbol {
+                    Image(systemName: symbol)
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(Color(uiColor: .systemBackground))
+                }
+            }
+            .frame(width: 20, height: 20)
+        }
+        .buttonStyle(.plain)
+        .offset(x: 6, y: -6)
     }
 }
 #endif

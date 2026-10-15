@@ -35,7 +35,7 @@ enum ReporterPresenter {
             Mizu.report(note: note, screen: screen, parts: parts)
         }
         if let sheet = controller.sheetPresentationController {
-            sheet.detents = [.medium(), .large()]
+            sheet.detents = [.large()]  // the keyboard is up from the start; half height would cut the top off
             sheet.prefersGrabberVisible = true
         }
         top.present(controller, animated: true)

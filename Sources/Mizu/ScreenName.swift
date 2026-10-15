@@ -19,4 +19,30 @@ enum ScreenName {
         }
         return tokens.first ?? typeName
     }
+
+    /// How a person would say it: `PrewarmingViewController` → "prewarming", `HotelDetailView` → "hotel detail".
+    static func spoken(_ name: String) -> String {
+        var base = name
+        for suffix in ["ViewController", "Controller", "View", "Screen", "Page"] where base.count > suffix.count && base.hasSuffix(suffix) {
+            base.removeLast(suffix.count)
+            break
+        }
+        var words: [String] = []
+        var current = ""
+        for ch in base {
+            if ch.isUppercase, let last = current.last, last.isLowercase || last.isNumber {
+                words.append(current)
+                current = ""
+            }
+            if ch == "_" || ch == " " {
+                if !current.isEmpty { words.append(current) }
+                current = ""
+            } else {
+                current.append(ch)
+            }
+        }
+        if !current.isEmpty { words.append(current) }
+        let spoken = words.joined(separator: " ").lowercased()
+        return spoken.isEmpty ? name : spoken
+    }
 }

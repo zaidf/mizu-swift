@@ -123,69 +123,69 @@ final class VoiceRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
 ///
 /// The view's structure never changes between states (only its text and colors do). If it did, SwiftUI would swap
 /// in a new view mid-press and the finger's release would go to a view that no longer exists.
+/// The square mic next to "send". Hold it to talk; let go to stop.
 struct HoldToTalkButton: View {
+    @ObservedObject var recorder: VoiceRecorder
+
+    var body: some View {
+        let recording = recorder.isRecording
+        RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .fill(recording ? Color.red : Color.clear)
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(recording ? Color.red : Color.primary.opacity(0.25), lineWidth: 1))
+            .overlay(
+                Image(systemName: recording ? "waveform" : "mic")
+                    .font(.system(size: 19, weight: .medium))
+                    .foregroundStyle(recording ? Color.white : Color.primary)
+            )
+            .frame(width: 54, height: 54)
+            .scaleEffect(recording ? 1.06 : 1)
+            .animation(.spring(response: 0.25, dampingFraction: 0.7), value: recording)
+            // SwiftUI gestures get cancelled by the sheet's own pan handling; a plain UIKit control doesn't.
+            .overlay(PressTracker(onPress: { recorder.start() }, onRelease: { recorder.stop() }))
+            .accessibilityLabel("Hold to record a voice note")
+    }
+}
+
+/// One quiet line above the buttons: how to talk, the running clock, or what went wrong.
+struct VoiceHint: View {
     @ObservedObject var recorder: VoiceRecorder
     @State private var now = Date()
     private let ticker = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
 
-    private let mono = Font.system(.callout, design: .monospaced)
-
     var body: some View {
-        HStack(spacing: 12) {
-            Text(title)
-                .foregroundStyle(color)
-                .font(mono)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-                .padding(.vertical, 10)
-                .padding(.horizontal, 14)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .overlay(RoundedRectangle(cornerRadius: 2).stroke(.secondary.opacity(isRecording ? 0.9 : 0.5), style: StrokeStyle(lineWidth: 1, dash: isRecording ? [] : [4, 3])))
-                // SwiftUI gestures get cancelled by the sheet's own pan handling; a plain UIKit control doesn't.
-                .overlay(PressTracker(onPress: { recorder.start() }, onRelease: { recorder.stop() }))
-                .accessibilityLabel("Hold to record a voice note")
-
-            Button("✕") { recorder.discard() }
-                .font(mono)
-                .foregroundStyle(.secondary)
-                .opacity(isRecorded ? 1 : 0)
-                .disabled(!isRecorded)
-                .accessibilityLabel("Delete voice note")
-        }
-        .onReceive(ticker) { now = $0 }
+        Text(text)
+            .font(.system(.footnote, design: .monospaced))
+            .foregroundStyle(recorder.isRecording ? Color.red : Color.secondary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .onReceive(ticker) { now = $0 }
     }
 
-    private var isRecording: Bool {
-        if case .recording = recorder.state { return true }
-        return false
-    }
-
-    private var isRecorded: Bool {
-        if case .recorded = recorder.state { return true }
-        return false
-    }
-
-    private var title: String {
+    private var text: String {
         switch recorder.state {
-        case .idle: return "● hold to talk"
-        case .recording(let since): return "● recording \(Self.clock(max(0, now.timeIntervalSince(since))))… let go to stop"
-        case .recorded(let duration): return "✓ voice note \(Self.clock(duration))"
-        case .silent: return "● didn't hear anything, hold and talk"
+        case .idle, .recorded: return "hold the mic to say it instead"
+        case .recording(let since): return "● \(Self.clock(max(0, now.timeIntervalSince(since)))) · let go to stop"
+        case .silent: return "didn't hear anything. hold and talk"
         case .denied: return "mic access is off (Settings)"
-        }
-    }
-
-    private var color: Color {
-        switch recorder.state {
-        case .recording: return .red
-        case .denied, .silent: return .secondary
-        default: return .primary
         }
     }
 
     static func clock(_ seconds: TimeInterval) -> String {
         let s = Int(seconds.rounded())
         return String(format: "%d:%02d", s / 60, s % 60)
+    }
+}
+
+extension VoiceRecorder {
+    var isRecording: Bool {
+        if case .recording = state { return true }
+        return false
+    }
+
+    var recordedDuration: TimeInterval? {
+        if case .recorded(let duration) = state { return duration }
+        return nil
     }
 }
 
