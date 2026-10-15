@@ -59,15 +59,16 @@ enum ReproBanner {
     }
 }
 
-/// "Fixed: …" when something this install reported was fixed (MCP `resolve_report` / `update_request`).
+/// "Fixed: …" when something this install reported is done (MCP `update_report`).
 @MainActor
 enum FixedBanner {
     @discardableResult
     static func show(_ notice: FixedNotice) -> Bool {
-        let shipped = notice.kind == "request"
+        let title = notice.label ?? (notice.kind == "request" ? "SHIPPED" : "FIXED")
+        let shipped = title == "SHIPPED"
         let shown = MizuBanner.show(
-            title: shipped ? "SHIPPED" : "FIXED",
-            message: notice.note ?? (shipped ? "Something you asked for is in the app now." : "Something you reported is fixed."),
+            title: title,
+            message: notice.note ?? (shipped ? "Something you asked for is in the app now." : title == "DONE" ? "Something you reported is done." : "Something you reported is fixed."),
             detail: "you \(shipped ? "asked" : "reported"): \"\(notice.what)\"",
             onClose: { Mizu.configClient?.acknowledge(notice) }
         )

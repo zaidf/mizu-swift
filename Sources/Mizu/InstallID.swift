@@ -1,6 +1,6 @@
 import Foundation
 
-/// An anonymous id for this install of the app, kept on the device. It ties reports and feature requests to the
+/// An anonymous id for this install of the app, kept on the device. It ties reports (including ones the app's AI files) to the
 /// install that sent them, so that install can hear when they're fixed. Not tied to a person or a device id;
 /// deleting the app resets it.
 enum InstallID {

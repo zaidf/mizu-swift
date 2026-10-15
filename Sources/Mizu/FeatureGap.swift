@@ -1,7 +1,7 @@
 import Foundation
 
 /// Lets your app's AI chat notice when a user wants something the app can't do yet, ask a question or two,
-/// and pass it to you (and Claude) as a feature request.
+/// and pass it to you (and Claude) as a report filed by the app's AI.
 ///
 /// 1. Add `FeatureGap.systemPrompt` to your chat's system prompt.
 /// 2. Offer the tool: `FeatureGap.anthropicTool` (Anthropic Messages API) or `FeatureGap.openAITool` (OpenAI-style).

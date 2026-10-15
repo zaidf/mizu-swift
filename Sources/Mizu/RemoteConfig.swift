@@ -25,7 +25,8 @@ struct RemoteConfig: Codable, Equatable {
 /// Something this install reported (or asked for) that's now fixed in a build it's running.
 struct FixedNotice: Codable, Equatable {
     let id: String
-    let kind: String          // "report" | "request"
+    let kind: String          // "report" | "request" (a feature)
+    let label: String?        // "FIXED" | "SHIPPED" | "DONE", from the server's kind; older servers don't send it
     let what: String          // what they reported or asked for
     let note: String?         // what was done
     let fixed_in_build: String?

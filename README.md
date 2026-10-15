@@ -131,7 +131,7 @@ If your app has an AI chat, let it pass on things users want that the app can't 
 let result = Mizu.handleFeatureGap(input: toolUse.input, conversation: history)   // send back as the tool result
 ```
 
-Claude sees them with `list_requests` / `get_request`.
+Each one becomes a report filed by the app's AI, alongside the ones you shake in: Claude sees them with `list_reports {from: "ai"}`.
 
 `FeatureGap.systemPrompt` adds exactly this to your prompt: *"If the user asks for something you or this app can't
 do yet, don't pretend and don't just say no. If it isn't clear what they want or why, ask one or two short
@@ -140,8 +140,8 @@ the developer."* The last 12 messages of the conversation go with each request.
 
 ## Closing the loop
 
-When Claude fixes something you reported (`resolve_report`) or builds something users asked for
-(`update_request` → shipped), the install that sent it shows a small card once, the next time it opens:
+When Claude marks a report done (`update_report`), whether it fixed a bug or built something someone asked for,
+the install that sent it shows a small card once, the next time it opens:
 
     FIXED
     Hotel photos load instantly now.

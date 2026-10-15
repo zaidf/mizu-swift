@@ -56,7 +56,7 @@ public enum Mizu {
     static var timeline: Timeline?
     static var llmStore: LLMStore?
     static var configClient: ConfigClient?
-    /// Anonymous id for this install; goes with reports and feature requests (see InstallID).
+    /// Anonymous id for this install; goes with every report it sends (see InstallID).
     static var installID: String?
     private static var networkObserver: NetworkObserver?
     private static var persistTimer: Timer?

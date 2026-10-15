@@ -25,7 +25,7 @@ final class LoopTests: XCTestCase {
 
     private let twoFixes = #"""
     {"config":{},"server_time":0,"fixed":[
-      {"id":"r_1","kind":"report","what":"hotel photos take seconds to load","note":"Photos now load instantly.","fixed_in_build":"43","reported_at":1},
+      {"id":"r_1","kind":"report","label":"FIXED","what":"hotel photos take seconds to load","note":"Photos now load instantly.","fixed_in_build":"43","reported_at":1},
       {"id":"fr_2","kind":"request","what":"Export the chat as a PDF","note":null,"fixed_in_build":null,"reported_at":2}
     ]}
     """#
@@ -58,10 +58,12 @@ final class LoopTests: XCTestCase {
         try await Task.sleep(nanoseconds: 50_000_000)
         XCTAssertEqual(shown.map(\.id), ["r_1"], "one card at a time")
         XCTAssertEqual(shown.first?.note, "Photos now load instantly.")
+        XCTAssertEqual(shown.first?.label, "FIXED")
 
         await client.refresh() // server hasn't heard the ack yet: still returns both
         try await Task.sleep(nanoseconds: 50_000_000)
         XCTAssertEqual(shown.map(\.id), ["r_1", "fr_2"], "the next one, never r_1 again")
+        XCTAssertNil(shown.last?.label, "older servers don't send a label")
     }
 
     func testAFixThatCouldNotShowIsTriedAgain() async throws {
