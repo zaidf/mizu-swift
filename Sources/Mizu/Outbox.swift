@@ -6,11 +6,12 @@ struct OutboxPart: Equatable {
     let contentType: String
     let data: Data
 
-    /// Multipart field: attachments share one field, "attachment", each with its own file name.
-    var fieldName: String { name.hasPrefix("attachment:") ? "attachment" : name }
+    /// Parts that share a multipart field are named `<field>:<file name>`: "attachment:pipeline.log",
+    /// "timeline_segment:1739…ndjson.deflate". The rest use their name as the field.
+    var fieldName: String { name.split(separator: ":", maxSplits: 1).first.map(String.init) ?? name }
 
     var filename: String {
-        if name.hasPrefix("attachment:") { return String(name.dropFirst("attachment:".count)) }
+        if let colon = name.firstIndex(of: ":") { return String(name[name.index(after: colon)...]) }
         switch contentType {
         case "image/jpeg": return "\(name).jpg"
         case "image/png": return "\(name).png"

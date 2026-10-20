@@ -20,6 +20,9 @@ public enum Mizu {
         public var enableInRelease = false
         /// Keep a rolling timeline (screens, taps, keyboard, network, logs) and attach it to reports.
         public var recordTimeline = true
+        /// How many days of timeline the phone keeps (one small file per hour) and sends with each report.
+        /// Claude reads it a slice at a time, starting from an overview of the sessions.
+        public var timelineDays = 7
         /// Keep full prompts and responses of `Mizu.llm` calls; off keeps only model, timing and token counts.
         /// `nil` (the default) means: on in debug builds, which are you testing your own app, and off in release
         /// builds (`enableInRelease`), where it would be other people's conversations. Set it to decide yourself.
@@ -79,8 +82,8 @@ public enum Mizu {
         client = MizuClient(key: key, endpoint: options.endpoint)
 
         if options.recordTimeline {
-            let timeline = Timeline(storeURL: Timeline.defaultStoreURL())
-            timeline.restore()
+            let timeline = Timeline(retention: TimeInterval(max(1, options.timelineDays)) * 86_400, storeDirectory: Timeline.defaultStoreDirectory())
+            timeline.restore(legacyURL: Timeline.legacyStoreURL())
             var launch = DeviceInfo.appMeta().compactMapValues { $0 as? String }.mapValues(TimelineValue.string)
             launch["pid"] = .int(Int(ProcessInfo.processInfo.processIdentifier))
             timeline.record("app.launch", launch)
@@ -248,9 +251,7 @@ public enum Mizu {
         var parts: [OutboxPart] = []
         if let timeline {
             timeline.record("mizu.report", ["trigger": .string(trigger)])
-            if let data = timeline.encodedSnapshot() {
-                parts.append(OutboxPart(name: "timeline", contentType: "application/json", data: data))
-            }
+            parts += timeline.uploadParts()
         }
         if let data = llmStore?.encodedSnapshot() {
             parts.append(OutboxPart(name: "llm", contentType: "application/json", data: data))

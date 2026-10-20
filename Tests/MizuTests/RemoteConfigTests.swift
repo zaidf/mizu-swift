@@ -41,7 +41,7 @@ final class RemoteConfigTests: XCTestCase {
         XCTAssertEqual(StubProtocol.successfulRequests.first?.value(forHTTPHeaderField: "Authorization"), "Bearer mizu_ik_test")
         XCTAssertTrue(client.debugGate.isOn("context"))
         XCTAssertFalse(client.debugGate.isOn("nav"))
-        XCTAssertEqual(timeline.maxAge, 20 * 60)
+        XCTAssertEqual(timeline.retention, Timeline.defaultRetention, "an old server's timeline_minutes no longer shortens the week")
         XCTAssertTrue(llm.recordContent)
         XCTAssertEqual(timeline.snapshot().last?.kind, "mizu.config", "Claude can see in the timeline when settings changed")
 
@@ -49,7 +49,7 @@ final class RemoteConfigTests: XCTestCase {
         serve(#"{"config":{},"server_time":0}"#)
         await client.refresh()
         XCTAssertFalse(client.debugGate.isOn("context"))
-        XCTAssertEqual(timeline.maxAge, 600)
+        XCTAssertEqual(timeline.retention, Timeline.defaultRetention)
         XCTAssertFalse(llm.recordContent)
     }
 

@@ -2,7 +2,7 @@
 
 Shake your phone, Claude sees what happened. Mizu is a small Swift package for solo iOS developers: shake while
 testing your own app, and your coding agent gets a screenshot, your note or voice note, device and build info, a
-timeline of the last few minutes, and the app's LLM calls, over MCP.
+timeline of the week before, and the app's LLM calls, over MCP.
 
 Setup (account, MCP, app key) is at [mizu.dance](https://mizu.dance). The easiest way is to tell Claude Code
 "Set me up with Mizu: https://mizu.dance/agents.txt". It follows those instructions.
@@ -65,8 +65,11 @@ you want the commit (scripts then run unsandboxed), or skip this step.
 
 ## Timeline
 
-Mizu keeps a rolling 10-minute timeline (screens, taps, keyboard, text focus, network requests, app lifecycle)
-and attaches it to every report. Make it better with:
+Mizu keeps a week of timeline (screens, taps, keyboard, text focus, network requests, app lifecycle) and
+attaches it to every report. On the phone it's one small file per hour in Application Support, appended every few
+seconds and deleted after 7 days (`Options.timelineDays`); a report sends it compressed, typically well under a
+megabyte. Claude starts from an overview of the sessions and reads the slices it needs, so bugs that build up over
+time ("slow after a while", "since yesterday") have their history. Make it better with:
 
 ```swift
 ChatView().mizuScreen("Chat")                                    // name SwiftUI screens

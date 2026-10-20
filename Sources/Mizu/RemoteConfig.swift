@@ -8,7 +8,7 @@ struct RemoteConfig: Codable, Equatable {
     }
 
     var debug_tags: [String]?
-    var timeline_minutes: Int?
+    var timeline_minutes: Int?  // SDK 0.4 and earlier; the timeline now always keeps `Options.timelineDays`
     var llm_content: Bool?
     var expires_at: Int64?
     var repro: Repro?
@@ -225,10 +225,9 @@ final class ConfigClient: @unchecked Sendable {
         lock.unlock()
         guard !same else { return }
         debugGate.set(c.debug_tags ?? [])
-        timeline?.setRetention(minutes: c.timeline_minutes ?? 10)
         llmStore?.recordContent = c.llm_content ?? defaultLLMContent
 
-        var summary: [String: TimelineValue] = ["timeline_min": .int(c.timeline_minutes ?? 10)]
+        var summary: [String: TimelineValue] = [:]
         if let tags = c.debug_tags, !tags.isEmpty { summary["debug_tags"] = .string(tags.joined(separator: ",")) }
         if let llm = c.llm_content { summary["llm_content"] = .bool(llm) }
         timeline?.record("mizu.config", summary)

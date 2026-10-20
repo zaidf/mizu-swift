@@ -88,35 +88,48 @@ struct TimelineEvent: Codable, Equatable {
     }
 }
 
-/// The black box: always recording the last few minutes, cheaply, so the timeline you need already exists
-/// when you shake. Capped by count and age; saved to disk now and then so it survives a crash or relaunch.
+/// The black box: always recording, cheaply, so the history you need already exists when you shake.
+///
+/// Two layers:
+/// - in memory, the last few minutes (`maxAge`, at most `maxEvents`), for quick looks and tests;
+/// - on disk, one append-only file per hour (`timeline/<hour start ms>.ndjson`), kept for `retention` (7 days by
+///   default). `persist()` appends what's new every few seconds, so saving stays cheap however long the history is.
+///
+/// A report uploads the hourly files compressed (`uploadParts()`); without a store it falls back to the in-memory
+/// window as one JSON part, the format servers have always read.
 final class Timeline: @unchecked Sendable {
+    static let defaultRetention: TimeInterval = 7 * 24 * 3600
+    /// Keeps a report's upload reasonable even after a very busy week; the oldest hours go first.
+    static let maxUploadBytes = 20 * 1024 * 1024
+
     private(set) var maxEvents: Int
     private(set) var maxAge: TimeInterval
-    private let storeURL: URL?
+    private(set) var retention: TimeInterval
+    private let storeDirectory: URL?
     private let clock: () -> Date
     private let lock = NSLock()
+    private let diskLock = NSLock()
     private var events: [TimelineEvent] = []
-    private var dirty = false
+    private var unsaved: [TimelineEvent] = []
 
-    init(maxEvents: Int = 5000, maxAge: TimeInterval = 600, storeURL: URL? = nil, clock: @escaping () -> Date = Date.init) {
+    init(maxEvents: Int = 5000, maxAge: TimeInterval = 600, retention: TimeInterval = Timeline.defaultRetention,
+         storeDirectory: URL? = nil, clock: @escaping () -> Date = Date.init) {
         self.maxEvents = maxEvents
         self.maxAge = maxAge
-        self.storeURL = storeURL
+        self.retention = retention
+        self.storeDirectory = storeDirectory
         self.clock = clock
     }
 
-    static func defaultStoreURL() -> URL {
+    static func defaultStoreDirectory() -> URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Mizu/timeline.json")
+            .appendingPathComponent("Mizu/timeline", isDirectory: true)
     }
 
-    /// How far back to keep, e.g. when Claude asks for a longer timeline. Event cap scales with it.
-    func setRetention(minutes: Int) {
-        lock.lock()
-        maxAge = TimeInterval(minutes * 60)
-        maxEvents = max(5000, minutes * 500)
-        lock.unlock()
+    /// Where SDK 0.4 and earlier kept the last few minutes; its events are moved into the hourly files once.
+    static func legacyStoreURL() -> URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Mizu/timeline.json")
     }
 
     private func now() -> Int64 { Int64(clock().timeIntervalSince1970 * 1000) }
@@ -130,11 +143,11 @@ final class Timeline: @unchecked Sendable {
         if events.count > maxEvents + maxEvents / 10 {
             events.removeFirst(events.count - maxEvents)
         }
-        dirty = true
+        if storeDirectory != nil { unsaved.append(event) }
         lock.unlock()
     }
 
-    /// Events from the last `maxAge` seconds, oldest first, at most `maxEvents`.
+    /// Events from the last `maxAge` seconds in memory, oldest first, at most `maxEvents`.
     func snapshot() -> [TimelineEvent] {
         lock.lock()
         defer { lock.unlock() }
@@ -142,7 +155,7 @@ final class Timeline: @unchecked Sendable {
         return Array(events.drop(while: { $0.t < cutoff }).suffix(maxEvents))
     }
 
-    /// The JSON uploaded with a report.
+    /// The in-memory window as one JSON document (the original upload format).
     func encodedSnapshot(extra: [String: TimelineValue] = [:]) -> Data? {
         struct Payload: Encodable {
             let captured_at: Int64
@@ -158,26 +171,113 @@ final class Timeline: @unchecked Sendable {
         return try? JSONEncoder().encode(payload)
     }
 
-    /// Writes recent events to disk if anything changed.
-    func persist() {
-        guard let storeURL else { return }
-        lock.lock()
-        let shouldWrite = dirty
-        dirty = false
-        lock.unlock()
-        guard shouldWrite, let data = try? JSONEncoder().encode(snapshot()) else { return }
-        try? FileManager.default.createDirectory(at: storeURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? data.write(to: storeURL, options: .atomic)
+    // MARK: disk
+
+    private static func hourStart(_ t: Int64) -> Int64 { t - ((t % 3_600_000) + 3_600_000) % 3_600_000 }
+
+    /// The hourly files on disk, oldest first.
+    func segmentFiles() -> [(start: Int64, url: URL)] {
+        guard let storeDirectory,
+              let names = try? FileManager.default.contentsOfDirectory(atPath: storeDirectory.path) else { return [] }
+        return names.compactMap { name -> (Int64, URL)? in
+            guard name.hasSuffix(".ndjson"), let start = Int64(name.dropLast(".ndjson".count)) else { return nil }
+            return (start, storeDirectory.appendingPathComponent(name))
+        }
+        .sorted { $0.0 < $1.0 }
     }
 
-    /// Loads what the previous run left behind (if still recent), so a crash-and-relaunch keeps its history.
-    func restore() {
-        guard let storeURL, let data = try? Data(contentsOf: storeURL),
-              let saved = try? JSONDecoder().decode([TimelineEvent].self, from: data) else { return }
-        let cutoff = now() - Int64(maxAge * 1000)
+    /// Appends new events to their hour's file and drops files older than `retention`.
+    func persist() {
+        guard let storeDirectory else { return }
         lock.lock()
-        events = saved.filter { $0.t >= cutoff } + events
+        let pending = unsaved
+        unsaved.removeAll(keepingCapacity: true)
         lock.unlock()
+
+        diskLock.lock()
+        defer { diskLock.unlock() }
+        let fm = FileManager.default
+        try? fm.createDirectory(at: storeDirectory, withIntermediateDirectories: true)
+        if !pending.isEmpty {
+            let encoder = JSONEncoder()
+            var byHour: [Int64: Data] = [:]
+            for event in pending {
+                guard var line = try? encoder.encode(event) else { continue }
+                line.append(0x0A)
+                byHour[Self.hourStart(event.t), default: Data()].append(line)
+            }
+            for (hour, data) in byHour {
+                let url = storeDirectory.appendingPathComponent("\(hour).ndjson")
+                if !fm.fileExists(atPath: url.path) { fm.createFile(atPath: url.path, contents: nil) }
+                if let handle = try? FileHandle(forWritingTo: url) {
+                    handle.seekToEndOfFile()
+                    handle.write(data)
+                    try? handle.close()
+                }
+            }
+        }
+        let oldest = Self.hourStart(now() - Int64(retention * 1000))
+        for file in segmentFiles() where file.start < oldest { try? fm.removeItem(at: file.url) }
+    }
+
+    /// After a relaunch: moves an SDK 0.4 file into the hourly files, then loads the last few minutes into memory.
+    func restore(legacyURL: URL? = nil) {
+        if let legacyURL, let data = try? Data(contentsOf: legacyURL),
+           let saved = try? JSONDecoder().decode([TimelineEvent].self, from: data) {
+            lock.lock()
+            unsaved = saved + unsaved
+            lock.unlock()
+            persist()
+            try? FileManager.default.removeItem(at: legacyURL)
+        }
+        let cutoff = now() - Int64(maxAge * 1000)
+        var recent: [TimelineEvent] = []
+        for file in segmentFiles().suffix(2) where file.start + 3_600_000 >= cutoff {
+            recent += Self.readEvents(file.url).filter { $0.t >= cutoff }
+        }
+        lock.lock()
+        events = Array((recent + events).suffix(maxEvents))
+        lock.unlock()
+    }
+
+    static func readEvents(_ url: URL) -> [TimelineEvent] {
+        guard let data = try? Data(contentsOf: url) else { return [] }
+        let decoder = JSONDecoder()
+        return data.split(separator: 0x0A).compactMap { try? decoder.decode(TimelineEvent.self, from: Data($0)) }
+    }
+
+    /// What a report uploads: the hourly files (compressed), plus a small info part. Saves first, so it's current.
+    /// Without a store (or if nothing's on disk yet) it's the in-memory window as one JSON part, as before.
+    func uploadParts(extra: [String: TimelineValue] = [:]) -> [OutboxPart] {
+        persist()
+        diskLock.lock()
+        let files = segmentFiles()
+        var segments: [OutboxPart] = []
+        var total = 0
+        var dropped = 0
+        for file in files.reversed() {  // newest first, so a very busy week loses its oldest hours
+            guard let raw = try? Data(contentsOf: file.url), !raw.isEmpty else { continue }
+            guard let packed = try? (raw as NSData).compressed(using: .zlib) as Data else { continue }
+            if total + packed.count > Self.maxUploadBytes { dropped += 1; continue }
+            total += packed.count
+            segments.append(OutboxPart(name: "timeline_segment:\(file.start).ndjson.deflate", contentType: "application/octet-stream", data: packed))
+        }
+        diskLock.unlock()
+        guard !segments.isEmpty else {
+            return encodedSnapshot(extra: extra).map { [OutboxPart(name: "timeline", contentType: "application/json", data: $0)] } ?? []
+        }
+        struct Info: Encodable {
+            let format = 2
+            let captured_at: Int64
+            let retention_seconds: Int
+            let tz_offset_minutes: Int
+            let hours_left_out: Int
+            let info: [String: TimelineValue]
+        }
+        let info = Info(captured_at: now(), retention_seconds: Int(retention), tz_offset_minutes: TimeZone.current.secondsFromGMT() / 60,
+                        hours_left_out: dropped, info: extra)
+        guard let infoData = try? JSONEncoder().encode(info) else { return [] }
+        return [OutboxPart(name: "timeline_info", contentType: "application/json", data: infoData)] + segments.reversed()
     }
 
     var count: Int {
