@@ -62,15 +62,29 @@ enum ReporterPresenter {
     }
 }
 
-final class ReportSheetController: UIHostingController<ReportSheet> {
+final class ReportSheetController: UIHostingController<ReportSheet>, UIAdaptivePresentationControllerDelegate {
     init(screenshot: UIImage?, screen: String, reproNote: String?, send: @escaping (String, Bool, Data?, [Data]) -> Void) {
         var dismiss: () -> Void = {}
-        super.init(rootView: ReportSheet(screenshot: screenshot, screen: screen, reproNote: reproNote, send: send, dismiss: { dismiss() }))
+        var setDirty: (Bool) -> Void = { _ in }
+        super.init(rootView: ReportSheet(screenshot: screenshot, screen: screen, reproNote: reproNote, send: send,
+                                         dismiss: { dismiss() }, setDirty: { setDirty($0) }))
         dismiss = { [weak self] in self?.dismiss(animated: true) }
+        setDirty = { [weak self] in self?.isModalInPresentation = $0 }
+        presentationController?.delegate = self
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
+
+    // A swipe down on a report with something in it asks first, like Mail.
+    func presentationControllerDidAttemptToDismiss(_ presentationController: UIPresentationController) {
+        let confirm = UIAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
+        confirm.addAction(UIAlertAction(title: "Discard Report", style: .destructive) { [weak self] _ in self?.dismiss(animated: true) })
+        confirm.addAction(UIAlertAction(title: "Keep Editing", style: .cancel))
+        confirm.popoverPresentationController?.sourceView = view
+        confirm.popoverPresentationController?.sourceRect = CGRect(x: view.bounds.midX, y: 0, width: 1, height: 1)
+        present(confirm, animated: true)
+    }
 }
 
 enum Screenshot {

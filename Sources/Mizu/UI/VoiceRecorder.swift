@@ -13,6 +13,8 @@ final class VoiceRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
         case recorded(duration: TimeInterval)
         /// Recorded, but nothing louder than room noise: mic muted, covered, or nobody spoke.
         case silent
+        /// A tap rather than a hold.
+        case tooShort
         case denied
     }
 
@@ -57,6 +59,7 @@ final class VoiceRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
                 recorder.record(forDuration: Self.maxDuration)
                 self.recorder = recorder
                 Mizu.timeline?.record("voice.start")
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 state = .recording(since: Date())
             } catch {
                 MizuLog.warn("Could not start recording: \(error)")
@@ -66,8 +69,13 @@ final class VoiceRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
     }
 
     func stop() {
+        let wasHolding = holding
         holding = false
-        guard let recorder else { return }
+        guard let recorder else {
+            // Let go before recording even began: a tap, not a hold. (Send also calls stop, but nothing is held then.)
+            if wasHolding, state != .denied { state = .tooShort }
+            return
+        }
         let duration = recorder.isRecording ? recorder.currentTime : Self.maxDuration
         recorder.stop()
         self.recorder = nil
@@ -75,8 +83,10 @@ final class VoiceRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
         Mizu.timeline?.record("voice.stop", ["ms": .int(Int(duration * 1000))])
 
         // A blip from a mis-tap isn't a voice note (and Whisper invents words for silence).
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
         guard duration >= 0.6, let data = try? Data(contentsOf: fileURL) else {
             discard()
+            state = .tooShort
             return
         }
         if AudioLevel.isSilent(wav: data) {
@@ -94,7 +104,8 @@ final class VoiceRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
         recorder = nil
         audio = nil
         try? FileManager.default.removeItem(at: fileURL)
-        if state != .denied && state != .silent { state = .idle }
+        if case .recording = state { state = .idle }
+        if case .recorded = state { state = .idle }
     }
 
     /// Hit the one-minute cap while still holding: keep what was recorded.
@@ -119,26 +130,24 @@ final class VoiceRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
     }
 }
 
-/// "hold to talk" — press and hold to record, let go to stop.
+/// The first tile in the attachment row, shaped like "+". Hold it to talk; let go to stop.
 ///
-/// The view's structure never changes between states (only its text and colors do). If it did, SwiftUI would swap
+/// The view's structure never changes between states (only its colors do). If it did, SwiftUI would swap
 /// in a new view mid-press and the finger's release would go to a view that no longer exists.
-/// The square mic next to "send". Hold it to talk; let go to stop.
 struct HoldToTalkButton: View {
     @ObservedObject var recorder: VoiceRecorder
 
     var body: some View {
         let recording = recorder.isRecording
-        RoundedRectangle(cornerRadius: 14, style: .continuous)
-            .fill(recording ? Color.red : Color.clear)
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(recording ? Color.red : Color.primary.opacity(0.25), lineWidth: 1))
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .fill(recording ? Color.red : Color.primary.opacity(0.05))
             .overlay(
                 Image(systemName: recording ? "waveform" : "mic")
-                    .font(.system(size: 19, weight: .medium))
+                    .font(.system(size: 17, weight: .regular))
                     .foregroundStyle(recording ? Color.white : Color.primary)
             )
-            .frame(width: 54, height: 54)
-            .scaleEffect(recording ? 1.06 : 1)
+            .frame(width: MizuTile.addWidth, height: MizuTile.height)
+            .scaleEffect(recording ? 1.05 : 1)
             .animation(.spring(response: 0.25, dampingFraction: 0.7), value: recording)
             // SwiftUI gestures get cancelled by the sheet's own pan handling; a plain UIKit control doesn't.
             .overlay(PressTracker(onPress: { recorder.start() }, onRelease: { recorder.stop() }))
@@ -146,14 +155,15 @@ struct HoldToTalkButton: View {
     }
 }
 
-/// One quiet line above the buttons: how to talk, the running clock, or what went wrong.
+/// One quiet line above the buttons, only when there's something to say: the running clock, how to talk after a
+/// tap, or what went wrong.
 struct VoiceHint: View {
     @ObservedObject var recorder: VoiceRecorder
     @State private var now = Date()
     private let ticker = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        Text(text)
+        Text(Self.text(for: recorder.state, now: now) ?? "")
             .font(.system(.footnote, design: .monospaced))
             .foregroundStyle(recorder.isRecording ? Color.red : Color.secondary)
             .lineLimit(1)
@@ -162,12 +172,13 @@ struct VoiceHint: View {
             .onReceive(ticker) { now = $0 }
     }
 
-    private var text: String {
-        switch recorder.state {
-        case .idle, .recorded: return "hold the mic to say it instead"
-        case .recording(let since): return "● \(Self.clock(max(0, now.timeIntervalSince(since)))) · let go to stop"
-        case .silent: return "didn't hear anything. hold and talk"
-        case .denied: return "mic access is off (Settings)"
+    static func text(for state: VoiceRecorder.State, now: Date = Date()) -> String? {
+        switch state {
+        case .idle, .recorded: return nil
+        case .recording(let since): return "listening · \(clock(max(0, now.timeIntervalSince(since))))"
+        case .tooShort: return "hold the mic to talk"
+        case .silent: return "didn't catch that. hold and talk"
+        case .denied: return "turn on the mic in settings"
         }
     }
 

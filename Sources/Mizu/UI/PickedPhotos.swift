@@ -53,19 +53,19 @@ struct PhotoAttachments: View {
                 .scaledToFill()
                 .mizuTile()
                 .overlay(alignment: .topTrailing) {
-                    TileBadge(symbol: "xmark", filled: true) { selection.removeAll { $0 == photo.id } }
+                    TileBadge(symbol: "xmark") { selection.removeAll { $0 == photo.id } }
                         .accessibilityLabel("Remove photo")
                 }
         }
         ForEach(0..<loading, id: \.self) { _ in
-            ProgressView().mizuTile()
+            ProgressView().mizuTile(filled: true)
         }
         // Always there (the picker also edits the selection); just faint once there are five.
         PhotosPicker(selection: $selection, maxSelectionCount: PickedPhoto.maxCount, matching: .images) {
             Image(systemName: "plus")
-                .font(.system(size: 18, weight: .regular))
+                .font(.system(size: 17, weight: .regular))
                 .foregroundStyle(.secondary)
-                .mizuTile(dashed: true)
+                .mizuTile(width: MizuTile.addWidth, filled: true)
                 .opacity(photos.count + loading < PickedPhoto.maxCount ? 1 : 0.4)
         }
         .buttonStyle(.plain)
@@ -93,40 +93,50 @@ struct PhotoAttachments: View {
     }
 }
 
-/// The report sheet's attachment tiles: 64pt squares with a hairline edge.
+/// The report sheet's attachment tiles: all the same height, 3:4 unless they have a shape of their own (the screenshot).
+enum MizuTile {
+    static let height: CGFloat = 88
+    static let width: CGFloat = 66
+    /// "+" is an offer, not content: narrower than what it adds.
+    static let addWidth: CGFloat = 44
+}
+
 extension View {
-    func mizuTile(dashed: Bool = false) -> some View {
-        frame(width: 64, height: 64)
+    /// Images get a hairline so a white screen doesn't melt into the sheet; `filled` tiles (voice, "+") are a soft
+    /// wash instead, no edge.
+    func mizuTile(width: CGFloat = MizuTile.width, filled: Bool = false) -> some View {
+        frame(width: width, height: MizuTile.height)
+            .background(Color.primary.opacity(filled ? 0.05 : 0))
             .contentShape(Rectangle())
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(Color.primary.opacity(dashed ? 0.3 : 0.15), style: StrokeStyle(lineWidth: 1, dash: dashed ? [3, 3] : []))
+                    .strokeBorder(Color.primary.opacity(filled ? 0 : 0.12), lineWidth: 0.5)
             )
     }
 }
 
-/// The small round button on a tile's corner: ✕ to remove, ✓ for "included".
+/// The small round button on a tile's corner: ✕ to take it out, + to put it back.
 struct TileBadge: View {
-    let symbol: String?
-    let filled: Bool
+    let symbol: String
     let action: () -> Void
+
+    /// How far the badge hangs past the tile's corner; the row leaves this much room.
+    static let overhang: CGFloat = 6
 
     var body: some View {
         Button(action: action) {
-            ZStack {
-                Circle().fill(filled ? Color.primary : Color(uiColor: .systemBackground))
-                Circle().stroke(Color.primary.opacity(filled ? 0 : 0.4), lineWidth: 1)
-                if let symbol {
-                    Image(systemName: symbol)
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(Color(uiColor: .systemBackground))
-                }
-            }
-            .frame(width: 20, height: 20)
+            Image(systemName: symbol)
+                .font(.system(size: 7, weight: .heavy))
+                .foregroundStyle(Color(uiColor: .systemBackground))
+                .frame(width: 16, height: 16)
+                .background(Circle().fill(Color.primary))
+                .frame(width: 32, height: 32) // a fingertip, not a pinhead
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .offset(x: 6, y: -6)
+        // Centre the 16pt circle so its edge hangs `overhang` past the tile's corner.
+        .offset(x: 16 - 8 + Self.overhang, y: -(16 - 8 + Self.overhang))
     }
 }
 #endif
